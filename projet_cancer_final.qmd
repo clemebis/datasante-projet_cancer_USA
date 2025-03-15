@@ -1,0 +1,591 @@
+---
+title: "projet_cancer"
+format: html
+---
+
+# Prédiction du risque de cancer aux USA par comté
+
+These data cancer_reg.csv were aggregated from a number of sources including the American Community Survey ([census.gov](http://census.gov/)), [clinicaltrials.gov](http://clinicaltrials.gov/), and [cancer.gov](http://cancer.gov/)
+
+### Importation des librairies
+
+```{r}
+library(pacman)
+p_load(tidyverse, data.table, naniar, GGally, ggplot2, corrplot, maps, readr,dplyr,plotly,factoextra, cluster,randomForest,caret,shiny)
+```
+
+### Importation des données
+
+```{r}
+fichier <- "cancer_reg.csv"
+df <- read.csv(fichier)
+
+head(df)
+```
+
+```{r}
+colnames(df)
+```
+
+### Description du dataset
+
+Voici la description de chaque feature :
+
+-   **avganncount** : Nombre moyen de **cas de cancer diagnostiqués annuellement** *(a)*.
+-   **target_deathRate** : **Variable dépendante**. Nombre moyen de décès dus au cancer pour **100 000 habitants** *(a)*.
+-   **avgdeathsperyear** : Nombre moyen de **décès signalés dus au cancer** *(a)*.
+-   **incidenceRate** : Nombre moyen de **diagnostics de cancer pour 100 000 habitants** *(a)*.
+-   **medianIncome** : **Revenu médian** par comté *(b)*.
+-   **popEst2015** : **Population estimée** du comté en **2015** *(b)*.
+-   **povertyPercent** : **Pourcentage de la population vivant sous le seuil de pauvreté** *(b)*.
+-   **studyPerCap** : **Nombre de recherches cliniques liées au cancer** par habitant et par comté *(a)*.
+-   **binnedInc** : **Revenu médian** par habitant **regroupé par décile** *(b)*.
+-   **MedianAge** : **Âge médian** des résidents du comté *(b)*.
+-   **MedianAgeMale** : **Âge médian des hommes** résidant dans le comté *(b)*.
+-   **MedianAgeFemale** : **Âge médian des femmes** résidant dans le comté *(b)*.
+-   **Geography** : **Nom du comté** *(b)*.
+-   **AvgHouseholdSize** : **Taille moyenne des ménages** dans le comté *(b)*.
+-   **PercentMarried** : **Pourcentage des résidents du comté qui sont mariés** *(b)*.
+-   **PctNoHS18_24** : Pourcentage des résidents âgés de **18 à 24 ans** dont le plus haut niveau d'éducation est **inférieur au diplôme du secondaire** *(b)*.
+-   **PctHS18_24** : Pourcentage des résidents âgés de **18 à 24 ans** dont le plus haut niveau d'éducation est le **diplôme du secondaire** *(b)*.
+-   **PctSomeCol18_24** : Pourcentage des résidents âgés de **18 à 24 ans** ayant suivi **quelques années d'université** *(b)*.
+-   **PctBachDeg18_24** : Pourcentage des résidents âgés de **18 à 24 ans** titulaires d'une **licence** *(b)*.
+-   **PctHS25_Over** : Pourcentage des résidents âgés de **25 ans et plus** dont le plus haut niveau d'éducation est le **diplôme du secondaire** *(b)*.
+-   **PctBachDeg25_Over** : Pourcentage des résidents âgés de **25 ans et plus** titulaires d'une **licence** *(b)*.
+-   **PctEmployed16_Over** : Pourcentage des résidents âgés de **16 ans et plus employés** *(b)*.
+-   **PctUnemployed16_Over** : Pourcentage des résidents âgés de **16 ans et plus au chômage** *(b)*.
+-   **PctPrivateCoverage** : Pourcentage des résidents du comté ayant **une couverture santé privée** *(b)*.
+-   **PctPrivateCoverageAlone** : Pourcentage des résidents du comté ayant **uniquement une couverture santé privée** *(sans assistance publique)* *(b)*.
+-   **PctEmpPrivCoverage** : Pourcentage des résidents du comté ayant **une couverture santé privée fournie par un employeur** *(b)*.
+-   **PctPublicCoverage** : Pourcentage des résidents du comté bénéficiant **d'une couverture santé publique** *(b)*.
+-   **PctPublicCoverageAlone** : Pourcentage des résidents du comté bénéficiant **uniquement d'une couverture santé publique** *(b)*.
+-   **PctWhite** : Pourcentage des résidents du comté qui s'identifient comme **Blancs** *(b)*.
+-   **PctBlack** : Pourcentage des résidents du comté qui s'identifient comme **Noirs** *(b)*.
+-   **PctAsian** : Pourcentage des résidents du comté qui s'identifient comme **Asiatiques** *(b)*.
+-   **PctOtherRace** : Pourcentage des résidents du comté qui s'identifient dans **une autre catégorie que Blanc, Noir ou Asiatique** *(b)*.
+-   **PctMarriedHouseholds** : **Pourcentage des foyers mariés** dans le comté *(b)*.
+-   **BirthRate** : Nombre de naissances vivantes rapporté au nombre de femmes dans le comté *(b)*.
+
+*(a) Données de 2010 à 2016*\
+*(b) Estimations du recensement de 2013*
+
+On récupère les dimensions du dataset, le résumé, les données statistiques.
+
+```{r}
+str(df)
+
+summary(df)
+```
+
+### Visualisation de notre data set
+
+On fait une parenthèse pour pouvoir visualiser des résultats d'un point de vue global par comté.
+
+On utilise un dataset "cartes_usa.csv" avec les morts moyennes par an, et les données de chaque comtés.
+
+```{r}
+data <- read.csv("cartes_usa.csv")
+```
+
+```{r}
+data$county <- tolower(sub(", .*", "", data$geography))
+data$state <- tolower(sub(".*, ", "", data$geography))
+
+data$county <- gsub(" county| parish| borough", "", data$county)
+
+us_county_map <- map_data("county")
+
+us_county_map$region <- tolower(us_county_map$region)
+us_county_map$subregion <- tolower(us_county_map$subregion)
+
+map_data <- left_join(us_county_map, data, by = c("region" = "state", "subregion" = "county"))
+```
+
+```{r}
+min_value <- min(map_data$avgdeathsperyear, na.rm = TRUE)
+max_value <- max(map_data$avgdeathsperyear, na.rm = TRUE)
+
+ggplot(map_data, aes(x = long, y = lat, group = group, fill = avgdeathsperyear)) +
+  geom_polygon(color = "black", size = 0.1) +
+  scale_fill_viridis_c(trans = "log10", option = "plasma", limits = c(min_value, max_value)) +
+  theme_minimal() +
+  labs(title = "Mortalité moyenne par cancer dans chaque comté aux USA",
+       fill = "Décès Moyens/An") +
+  coord_fixed(1.3)
+```
+
+```{r}
+data <- read.csv("cartes_usa.csv")
+
+data$county <- tolower(sub(", .*", "", data$geography))
+data$state <- tolower(sub(".*, ", "", data$geography))
+
+data$county <- gsub(" county| parish| borough", "", data$county)
+
+#création du ratio
+data$ratio <- data$avgdeathsperyear / data$popest2015
+
+us_county_map <- map_data("county")
+
+us_county_map$region <- tolower(us_county_map$region)
+us_county_map$subregion <- tolower(us_county_map$subregion)
+
+# Fusion des données avec la carte
+map_data <- left_join(us_county_map, data, by = c("region" = "state", "subregion" = "county"))
+
+min_value <- min(map_data$ratio, na.rm = TRUE)
+max_value <- max(map_data$ratio, na.rm = TRUE)
+
+ggplot(map_data, aes(x = long, y = lat, group = group, fill = ratio)) +
+  geom_polygon(color = "black", size = 0.1) +
+  scale_fill_viridis_c(trans = "log10", option = "plasma", limits = c(min_value, max_value)) +
+  theme_minimal() +
+  labs(title = "Ratio des décès moyens de cancer dans chaque comté aux USA",
+       fill = "Ratio Décès/Habitants") +
+  coord_fixed(1.3)
+```
+
+```{r}
+data <- read.csv("cartes_usa.csv")
+
+data$county <- tolower(sub(", .*", "", data$geography))
+data$state <- tolower(sub(".*, ", "", data$geography))
+
+data$county <- gsub(" county| parish| borough", "", data$county)
+
+data$ratio <- data$avgdeathsperyear / data$popest2015
+
+us_county_map <- map_data("county")
+
+us_county_map$region <- tolower(us_county_map$region)
+us_county_map$subregion <- tolower(us_county_map$subregion)
+
+map_data <- left_join(us_county_map, data, by = c("region" = "state", "subregion" = "county"))
+
+map_data <- na.omit(map_data)
+
+# Carte avec double gradient : Couleur (ratio), Opacité (nombre de décès)
+ggplot(map_data, aes(x = long, y = lat, group = group, fill = ratio, alpha = avgdeathsperyear)) +
+  geom_polygon(color = "black", size = 0.1) +
+  scale_fill_viridis_c(trans = "log10", option = "plasma") +
+  scale_alpha(range = c(0.2, 1)) +  # Plus transparent pour les faibles valeurs, plus opaque pour les fortes
+  theme_minimal() +
+  labs(title = "Ratio des décès par cancer aux USA avec la mortalité absolue",
+       fill = "Ratio Décès/Habitants",
+       alpha = "Mortalité Absolue (Décès/An)") +
+  coord_fixed(1.3)
+```
+
+### Analyse des valeurs manquantes de notre dataset
+
+```{r}
+vis_miss(df) + ggtitle("Proportion des valeurs manquantes")
+```
+
+On a donc seulement 3 colonnes où des données sont manquantes. Nous allons donc les trouver pour ensuite décider de comment gérer ces valeurs.
+
+```{r}
+missing_values <- colSums(is.na(df))
+missing_values <- missing_values[missing_values > 0]
+print(missing_values)
+```
+
+### Gestion des valeurs manquantes
+
+**pctsomecol18_24** représente le pourcentage de jeunes (18-24 ans) ayant suivi quelques études supérieures.
+
+Elle a 75% de valeurs manquantes, ce qui signifie que la majorité des données ne sont pas disponibles.Une imputation de cette variable ne serait pas fiable car elle pourrait introduire des biais.
+
+De plus, cette variable n’a pas de lien direct avec le risque de cancer. Les facteurs socio-économiques plus généraux (revenu médian, pauvreté) sont plus pertinents.
+
+Nous allons donc simplement la supprimer de nos données :
+
+```{r}
+df <- df %>% select(-pctsomecol18_24)
+```
+
+Pour **pctemployed16_over** et **pctprivatecoveragealone**, le nombre de valeur manquantes est moins important, respectivement 5% et 20% de l'ensemble de nos données.
+
+On utilise ici la méthode de l’imputation des valeurs manquantes par la médiane des valeurs non manquantes de la colonne correspondante.
+
+```{r}
+df$pctemployed16_over[is.na(df$pctemployed16_over)] <- median(df$pctemployed16_over, na.rm = TRUE)
+df$pctprivatecoveragealone[is.na(df$pctprivatecoveragealone)] <- median(df$pctprivatecoveragealone, na.rm = TRUE)
+```
+
+On finit par vérifier qu'il n'y a aucune donnée manquante.
+
+```{r}
+sum(is.na(df))  # Doit nécessairement afficher 0
+```
+
+C'est bien le cas, on peut continuer.
+
+### Analyse statistique
+
+Dans cette partie, nous allons pousser l'analyse statistiques et afficher les matrices de corrélation. Pour cela, on crée un data set "df_num" avec seulement les valeurs numériques.
+
+```{r}
+df_num <- df %>% select(where(is.numeric))
+```
+
+On affiche ensuite les histogrammes de distribution des différentes variables :
+
+```{r}
+df_num %>%
+  pivot_longer(cols = everything(), names_to = "Variable", values_to = "Valeur") %>%
+  ggplot(aes(x = Valeur)) +
+  geom_histogram(fill = "steelblue", bins = 30, alpha = 0.7) +
+  facet_wrap(~ Variable, scales = "free") +
+  theme_minimal() +
+  ggtitle("Distribution des variables numériques")
+```
+
+On affiche ensuite la matrices de corrélation sous forme de heatmap :
+
+```{r}
+cor_matrix <- cor(df_num, use = "pairwise.complete.obs")
+corrplot(cor_matrix, method = "color", type = "upper", tl.cex = 0.7, diag = FALSE)
+```
+
+### Machine Learning Non Supervisé : Réduction de dimensions et méthodes de clustering
+
+Dans cette partie, nous allons utiliser différentes méthodes de clustering et de réduction de dimensions pour répartir nos comtés en différents clusters :
+
+```{r}
+df_scaled <- scale(df_num)
+
+summary(df_scaled)
+```
+
+```{r}
+df_scaled <- na.omit(df_scaled)
+```
+
+Nous allons réduire la dimensionnalité via une Principal Component Analysis
+
+```{r}
+pca_result <- prcomp(df_scaled, center = TRUE, scale. = TRUE)
+
+# On visualise la variance expliquée
+fviz_eig(pca_result, addlabels = TRUE, ylim = c(0, 100))
+```
+
+Ton graphe montre la variance expliquée par chaque composante principale (PCA). Voici les points clés à retenir :
+
+1.  La première composante (PC1) explique 30.7% de la variance, suivie de PC2 (16.4%).
+
+2.  Les premières 2-3 composantes capturent la majorité de l'information.
+
+3.  À partir de PC4, la variance expliquée diminue fortement (\< 7%).
+
+4.  Le point d’inflexion est autour de PC3-PC4, ce qui suggère un nombre optimal de dimensions à conserver.
+
+```{r}
+# Récupérer les coefficients des composantes principales (loadings)
+loadings <- pca_result$rotation  # Matrice des coefficients
+print(loadings[, 1:3])  # Colonnes = PC1, PC2, PC3
+```
+
+```{r}
+loadings <- as.data.frame(pca_result$rotation[, 1:3])
+
+fig <- plot_ly(
+  x = loadings$PC1, 
+  y = loadings$PC2, 
+  z = loadings$PC3, 
+  type = "scatter3d", 
+  mode = "markers+text", 
+  text = rownames(loadings), 
+  marker = list(size = 5, color = "blue")  # Style des points
+)
+
+fig <- fig %>% layout(scene = list(
+  xaxis = list(title = "PC1"),
+  yaxis = list(title = "PC2"),
+  zaxis = list(title = "PC3")
+))
+
+fig  # Afficher le graphe interactif
+
+```
+
+Nous allons à présent trouver le nombre de cluster pour coller à nos données avec la méthode du coude
+
+```{r}
+df_pca <- as.data.frame(pca_result$x[, 1:3])  # Prendre les 3 premières composantes
+colnames(df_pca) <- c("PC1", "PC2", "PC3")
+```
+
+```{r}
+fviz_nbclust(df_pca, kmeans, method = "wss")  # Méthode du coude
+```
+
+```{r}
+optimal_k <- 3  # À ajuster selon la méthode du coude
+set.seed(42)
+kmeans_result <- kmeans(df_pca, centers = optimal_k, nstart = 25)
+```
+
+```{r}
+df_pca$Cluster <- as.factor(kmeans_result$cluster)
+
+fig <- plot_ly(df_pca, x = ~PC1, y = ~PC2, z = ~PC3, color = ~Cluster, colors = "Set1") %>%
+  add_markers() %>%
+  layout(scene = list(xaxis = list(title = "PC1"),
+                      yaxis = list(title = "PC2"),
+                      zaxis = list(title = "PC3")),
+         title = paste("K-Means Clustering avec", optimal_k, "clusters"))
+
+fig  # Affiche l'intrigue interactive
+```
+
+On peut aussi tenter d'appliquer du clustering hiérarchique à notre problème, avec la distance euclidienne.
+
+On utilise ici la méthode de Ward, en choisissant k d'avance pour la comparabilité : si l’on compare avec d’autres méthodes comme k-means appliquée ci dessus, il est utile d’avoir le même k pour voir les différences.
+
+```{r}
+dist_matrix <- dist(df_pca, method = "euclidean")
+
+hc <- hclust(dist_matrix, method = "ward.D2")
+
+plot(hc, labels = FALSE, main = "Dendrogramme - Clustering hiérarchique")
+
+k <- 3
+clusters <- cutree(hc, k)
+
+df$cluster <- as.factor(clusters)
+
+ggplot(df_pca, aes(x = PC1, y = PC2, color = as.factor(clusters))) +
+  geom_point(size = 3) +
+  theme_minimal() +
+  labs(title = "Clusters après clustering hiérarchique", color = "Cluster")
+```
+
+### Machine Learning Supervisé : prédiction du nombre de décès
+
+On va travailler avec des modèles de régression linéaire pour déterminer les variables intéressantes.
+
+On va créer plusieurs modèles en ajoutant progressivement les variables pour voir l’amélioration de la prédiction.
+
+```{r}
+model1 <- lm(target_deathrate ~ incidencerate, data = df)
+summary(model1)  # Vérifier R² et les coefficients
+```
+
+La p-value (\< 2e-16) est extrêmement faible, ce qui indique que l’effet de l'incidence sur target_deathrate est hautement significatif. Ce modèle explique seulement 20.2% de la variance de target_deathrate.
+
+On ajoute les facteurs socio-économiques :
+
+```{r}
+model2 <- lm(target_deathrate ~ incidencerate + medincome + povertypercent + popest2015, data = df)
+summary(model2)
+```
+
+Le modèle explique maintenant 40.95% de la variance de target_deathrate, avec toujours des p-value hautement significatives.
+
+On ajoute les facteurs démographiques :
+
+```{r}
+model3 <- lm(target_deathrate ~ incidencerate + medincome + povertypercent + popest2015 +
+             medianage + pctwhite + pctblack + pctasian + pctotherrace, data = df)
+summary(model3)
+```
+
+On ajoute les couvertures santé :
+
+```{r}
+model4 <- lm(target_deathrate ~ incidencerate + medincome + povertypercent + popest2015 +
+             medianage + pctwhite + pctblack + pctasian + pctotherrace +
+             pctprivatecoveragealone + pctempprivcoverage + pctpubliccoverage, data = df)
+summary(model4)
+```
+
+On va évaluer les modèles, en comparant les R² pour voir l’évolution, en analyse des résidus pour vérifier la normalité et l’homoscédasticité, et en vérifiant la multicolinéarité avec le VIF.
+
+```{r}
+rsq_values <- c(summary(model1)$r.squared,
+                summary(model2)$r.squared,
+                summary(model3)$r.squared,
+                summary(model4)$r.squared)
+print(rsq_values)
+```
+
+```{r}
+par(mfrow=c(2,2))  # Afficher plusieurs graphiques
+plot(model4)  # Vérifier les hypothèses du modèle
+```
+
+```{r}
+library(car)
+vif(model4)  # Vérifier la multicolinéarité
+```
+
+**Variables avec un VIF élevé**
+
+**Risque de multicolinéarité modérée à forte :**
+
+-   medincome (5.08)
+
+-   pctwhite (5.87)
+
+Ces valeurs sont légèrement au-dessus du seuil critique de 5, indiquant une multicolinéarité modérée.\
+Cela signifie que ces variables sont fortement corrélées avec d'autres, ce qui peut rendre leurs coefficients instables.
+
+**Variables à surveiller (VIF proche de 5) :**
+
+-   povertypercent (4.62)
+
+-   pctblack (4.63)
+
+-   pctempprivcoverage (4.61)
+
+-   pctprivatecoveragealone (3.98)
+
+-   pctpubliccoverage (3.73)
+
+Ces variables ne dépassent pas 5, mais elles sont suffisamment élevées pour signaler une corrélation non négligeable.
+
+### Tentative de sélection de variables avec Boruta
+
+On sélectionne les features qui nous intéressent pour la prédicion
+
+```{r}
+library(randomForest)
+library(caret)
+library(Boruta) 
+```
+
+```{r}
+# Étape 1: Sélection des variables importantes avec Boruta
+set.seed(123)
+boruta_result <- Boruta(target_deathrate ~ ., data = df, doTrace = 2)
+
+# Récupérer les variables confirmées comme importantes
+selected_vars <- getSelectedAttributes(boruta_result, withTentative = FALSE)
+print(selected_vars)
+```
+
+```{r}
+#On va supprimer les variables directement liée à l'incidence et aux nombres de cancer et studypercap car trop de 0
+
+vars_to_keep <- c("medincome", "popest2015", "povertypercent", 
+                  "medianagemale", "medianagefemale", "percentmarried", 
+                  "pctnohs18_24", "pcths18_24", "pctbachdeg18_24", 
+                  "pcths25_over", "pctbachdeg25_over", "pctemployed16_over", 
+                  "pctunemployed16_over", "pctprivatecoverage", 
+                  "pctprivatecoveragealone")
+
+selected_vars <- intersect(selected_vars, vars_to_keep)
+
+data_selected <- df[, c(selected_vars, "target_deathrate")]
+```
+
+```{r}
+preProc <- preProcess(data_selected[, selected_vars], method = c("center", "scale"))
+data_scaled <- predict(preProc, data_selected)
+data_scaled$target_deathrate <- data_selected$target_deathrate
+```
+
+On divise les données en données train/test
+
+```{r}
+set.seed(123)
+trainIndex <- createDataPartition(data_scaled$target_deathrate, p = 0.8, list = FALSE)
+trainData <- data_scaled[trainIndex, ]
+testData <- data_scaled[-trainIndex, ]
+```
+
+```{r}
+# Entraînement du modèle de régression linéaire
+model5 <- lm(target_deathrate ~ ., data = trainData)
+
+# Affichage du résumé du modèle
+summary(model5)
+
+# Prédictions sur les données de test
+predictions <- predict(model5, newdata = testData)
+
+# Évaluation du modèle (Calcul de l'erreur quadratique moyenne)
+rmse <- sqrt(mean((predictions - testData$target_deathrate)^2))
+cat("RMSE:", rmse, "\n")
+```
+
+Au final notre modèle avec les features sélectionnées est moins performant que notre modèle 4 qui prenaient en compte plus de données différentes, avec un R² à 0.4316082. On va utiliser ce modèle 5 juste pour créer une application avec la librairie shiny, mais sans que les résultats fournis soient réellement pertinent.
+
+### Application Shiny prédictive
+
+```{r}
+library(shiny)
+
+# Définition de l'interface utilisateur
+ui <- fluidPage(
+  titlePanel("Prédiction du risque de mortalité par cancer"),
+  sidebarLayout(
+    sidebarPanel(
+      numericInput("popest2015", "Population estimée (2015):", value = 50000, min = 1000, max = 1000000),
+      numericInput("povertypercent", "Pourcentage de pauvreté (%):", value = 15, min = 0, max = 100),
+      numericInput("medincome", "Revenu médian ($):", value = 50000, min = 10000, max = 100000),
+      numericInput("medianagemale", "Âge médian des hommes:", value = 40, min = 18, max = 100),
+      numericInput("medianagefemale", "Âge médian des femmes:", value = 40, min = 18, max = 100),
+      numericInput("percentmarried", "Pourcentage de personnes mariées (%):", value = 50, min = 0, max = 100),
+      numericInput("pctnohs18_24", "Sans diplôme (18-24 ans) (%):", value = 10, min = 0, max = 100),
+      numericInput("pcths18_24", "Diplôme secondaire (18-24 ans) (%):", value = 30, min = 0, max = 100),
+      numericInput("pctbachdeg18_24", "Diplôme universitaire (18-24 ans) (%):", value = 10, min = 0, max = 100),
+      numericInput("pcths25_over", "Diplôme secondaire (25 ans et +) (%):", value = 40, min = 0, max = 100),
+      numericInput("pctbachdeg25_over", "Diplôme universitaire (25 ans et +) (%):", value = 20, min = 0, max = 100),
+      numericInput("pctemployed16_over", "Emploi (16 ans et +) (%):", value = 60, min = 0, max = 100),
+      numericInput("pctunemployed16_over", "Chômage (16 ans et +) (%):", value = 10, min = 0, max = 100),
+      sliderInput("pctprivatecoverage", "Couverture privée (%):", min = 0, max = 100, value = 50),
+      sliderInput("pctprivatecoveragealone", "Couverture privée seule (%):", min = 0, max = 100, value = 30),
+      sliderInput("pctpubliccoverage", "Couverture publique (%):", min = 0, max = 100, value = 50),
+      sliderInput("pctwhite", "Population blanche (%):", min = 0, max = 100, value = 70),
+      sliderInput("birthrate", "Taux de natalité:", min = 0, max = 20, value = 5),
+      actionButton("predict", "Prédire")
+    ),
+    mainPanel(
+      h3("Résultat de la Prédiction"),
+      verbatimTextOutput("prediction")
+    )
+  )
+)
+
+# Définition du serveur
+server <- function(input, output) {
+  observeEvent(input$predict, {
+    new_data <- data.frame(
+      popest2015 = input$popest2015,
+      povertypercent = input$povertypercent,
+      medincome = input$medincome,
+      medianagemale = input$medianagemale,
+      medianagefemale = input$medianagefemale,
+      percentmarried = input$percentmarried,
+      pctnohs18_24 = input$pctnohs18_24,
+      pcths18_24 = input$pcths18_24,
+      pctbachdeg18_24 = input$pctbachdeg18_24,
+      pcths25_over = input$pcths25_over,
+      pctbachdeg25_over = input$pctbachdeg25_over,
+      pctemployed16_over = input$pctemployed16_over,
+      pctunemployed16_over = input$pctunemployed16_over,
+      pctprivatecoverage = input$pctprivatecoverage,
+      pctprivatecoveragealone = input$pctprivatecoveragealone,
+      pctpubliccoverage = input$pctpubliccoverage,
+      pctwhite = input$pctwhite,
+      birthrate = input$birthrate
+    )
+
+    # Utilisation de model5 pour la prédiction
+    if (exists("model5")) {
+      prediction <- predict(model5, new_data)
+      output$prediction <- renderText({ paste("Prédiction du taux de mortalité:", round(prediction, 2)) })
+    } else {
+      output$prediction <- renderText("Erreur: Le modèle 'model5' n'est pas chargé.")
+    }
+  })
+}
+
+# Lancement de l'application
+shinyApp(ui = ui, server = server)
+
+
+```
